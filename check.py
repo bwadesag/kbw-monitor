@@ -60,7 +60,7 @@ with sync_playwright() as p:
         # PHASE 1 : INITIALISATION
         print(f"\n🔵 PHASE 1 : INIT")
         try:
-            page.goto(URL, wait_until="networkidle", timeout=60000)
+            page.goto(URL, wait_until="domcontentloaded", timeout=60000)
             page.wait_for_timeout(4000)
         except:
             try: browser.close()
