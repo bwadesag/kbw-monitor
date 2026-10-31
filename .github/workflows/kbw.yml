@@ -13,6 +13,6 @@ jobs:
         with:
           python-version: '3.11'
       - run: pip install playwright requests && playwright install chromium --with-deps
-      - run: python check.py
+      - run: python -u check.py
         env:
           TG_TOKEN: ${{ secrets.TG_TOKEN }}
