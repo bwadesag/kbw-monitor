@@ -3,7 +3,7 @@ from datetime import date
 from playwright.sync_api import sync_playwright
 
 URL = "https://kbw-personal-services.butlerapp2.de/demo#/courses?fcourses=yaounde_deutsch_b2"
-TOKEN = os.getenv("TG_TOKEN", "8716192422:AAFRetwBNgiGWG6eyUaNQdUs9Op694xkNO8")
+TOKEN = os.getenv("TG_TOKEN", "")
 CHAT_IDS = ["8806922221", "-5434725968"]
 
 # Mémoire : { "02.11.2026 11:30": date_du_dernier_envoi }
