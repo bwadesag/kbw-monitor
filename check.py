@@ -6,7 +6,6 @@ URL = "https://kbw-personal-services.butlerapp2.de/demo#/courses?fcourses=yaound
 TOKEN = os.getenv("TG_TOKEN", "")
 CHAT_IDS = ["8806922221", "-5434725968"]
 
-# Mémoire : { "02.11.2026 11:30": date_du_dernier_envoi }
 notifie_libre_aujourdhui = {}
 notifie_complet_aujourdhui = {}
 
@@ -46,7 +45,7 @@ def scan(page):
             except: break
     return libres
 
-notify("✅ Bot démarré - anti-doublon = même jour bloqué")
+notify("✅ Bot démarré - anti-doublon = même jour bloqué - 24h/24")
 
 with sync_playwright() as p:
     browser = p.chromium.launch(headless=True, args=["--no-sandbox"])
@@ -54,10 +53,10 @@ with sync_playwright() as p:
     memo = set()
     first = True
     start = time.time()
+    # 5h50 = 21000s -> le workflow le relancera tout seul pour faire 24h/24
     max_dur = 21000 if os.getenv("GITHUB_ACTIONS")=="true" else 999999999
 
     while time.time() - start < max_dur:
-        # PHASE 1 : INITIALISATION
         print(f"\n🔵 PHASE 1 : INIT")
         try:
             page.goto(URL, wait_until="domcontentloaded", timeout=60000)
@@ -69,7 +68,6 @@ with sync_playwright() as p:
             page = browser.new_page()
             continue
 
-        # PHASE 2 : DETECTION
         print(f"🟡 PHASE 2 : DETECTION")
         actuelles = scan(page)
         print(f"  → {len(actuelles)} libres")
@@ -80,24 +78,20 @@ with sync_playwright() as p:
             print(f"  Init: {len(memo)} mémorisées, pas de notif au 1er tour")
             continue
 
-        # PHASE 3 : LIBRE - pas 2x même jour
         print(f"🟢 PHASE 3 : ENVOI LIBRE")
         for slot in actuelles:
-            # Si déjà notifié aujourd'hui → on skip
             if slot in notifie_libre_aujourdhui and notifie_libre_aujourdhui[slot] == date.today():
-                print(f"  ⏭️ Déjà notifié aujourd'hui: {slot}")
+                print(f"  ⏭ Déjà notifié aujourd'hui: {slot}")
                 continue
-            # Sinon c'est nouveau OU un autre jour → on notifie
             if slot not in memo or notifie_libre_aujourdhui.get(slot) != date.today():
                 notify(f"🔥 <b>LIBRE</b>\n📌 {slot}\n👉 {URL}")
                 notifie_libre_aujourdhui[slot] = date.today()
 
-        # PHASE 4 : REDEVENU COMPLET - pas 2x même jour
         print(f"🔴 PHASE 4 : COMPLET")
         redevenues = memo - actuelles
         for slot in redevenues:
             if slot in notifie_complet_aujourdhui and notifie_complet_aujourdhui[slot] == date.today():
-                print(f"  ⏭️ Complet déjà notifié aujourd'hui: {slot}")
+                print(f"  ⏭ Complet déjà notifié aujourd'hui: {slot}")
                 continue
             notify(f"❌ <b>Redevenu complet</b>\n📌 {slot}")
             notifie_complet_aujourdhui[slot] = date.today()
