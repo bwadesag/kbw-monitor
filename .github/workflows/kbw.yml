@@ -1,18 +1,34 @@
-name: KBW 60 Secondes
+name: KBW 24h Non-Stop
 on:
-  workflow_dispatch:
   schedule:
-    - cron: '0 */5 * * *'
+    - cron: '0 */4 * * *'  # toutes les 4h en backup
+  workflow_dispatch:
+
 jobs:
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 350
+    timeout-minutes: 350  # 5h50
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - run: pip install playwright requests && playwright install chromium --with-deps
-      - run: python -u check.py
+      - name: Install
+        run: pip install playwright requests && playwright install chromium --with-deps
+      - name: Scan 5h50
         env:
           TG_TOKEN: ${{ secrets.TG_TOKEN }}
+        run: python -u check.py
+
+      - name: Auto-restart pour 24h/24 7j/7
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Fin du run 5h50, auto-restart dans 60s..."
+          sleep 60
+          curl -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github.v3+json" \
+            https://api.github.com/repos/${{ github.repository }}/actions/workflows/kbw.yml/dispatches \
+            -d '{"ref":"main"}' || echo "Cron va reprendre"
