@@ -3,7 +3,11 @@ on:
   schedule:
     - cron: '0 */4 * * *'  # toutes les 4h en backup
   workflow_dispatch:
-
+  
+permissions:
+  contents: write
+  actions: write
+  
 jobs:
   check:
     runs-on: ubuntu-latest
