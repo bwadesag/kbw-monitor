@@ -1,5 +1,5 @@
 import os, re, time, requests
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 
 COURSES = (
     ("Yaounde B2", "https://kbw-personal-services.butlerapp2.de/demo#/courses?fcourses=yaounde_deutsch_b2"),
@@ -52,7 +52,15 @@ def _self_check():
     )
     assert _lien("Douala B2 — 26.11.2026 8:00 Uhr").endswith("douala_deutsch_b2")
     assert _lien("Yaounde B2 — 26.11.2026 8:00 Uhr").endswith("yaounde_deutsch_b2")
+    assert _dans_horaire(datetime(2026, 11, 25, 7, 0, tzinfo=timezone.utc))
+    assert not _dans_horaire(datetime(2026, 11, 25, 6, 59, tzinfo=timezone.utc))
+    assert _dans_horaire(datetime(2026, 11, 25, 16, 59, tzinfo=timezone.utc))
+    assert not _dans_horaire(datetime(2026, 11, 25, 17, 0, tzinfo=timezone.utc))
     print("self-check ok")
+
+def _dans_horaire(moment_utc):
+    # 8:00 inclus, 18:00 exclus, heure du Cameroun (UTC+1, sans changement d'heure).
+    return 8 <= (moment_utc + timedelta(hours=1)).hour < 18
 
 def _lien(slot):
     for city, url in COURSES:
@@ -105,17 +113,19 @@ def scan(page):
 def main():
     from playwright.sync_api import sync_playwright
 
-    notify("✅ Bot démarré - Yaounde B2 et Douala B2")
+    if not _dans_horaire(datetime.now(timezone.utc)):
+        print("hors plage 8h-18h, arret")
+        return
+    notify("✅ Bot démarré - Yaounde B2 et Douala B2 - 8h à 18h")
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True, args=["--no-sandbox"])
         page = browser.new_page()
         memo = set()
         first = True
-        start = time.time()
-        # 5h50 = 21000s -> le workflow le relancera tout seul pour faire 24h/24
-        max_dur = 21000 if os.getenv("GITHUB_ACTIONS") == "true" else 999999999
+        # ponytail: 5h40 stays under the 6h Actions job limit. The 13:50 run covers the rest until 18:00.
+        deadline = time.time() + (5 * 60 + 40) * 60
 
-        while time.time() - start < max_dur:
+        while time.time() < deadline and _dans_horaire(datetime.now(timezone.utc)):
             print("\n🔵 PHASE 1 : INIT")
             print("🟡 PHASE 2 : DETECTION")
             try:
@@ -159,6 +169,7 @@ def main():
             memo = actuelles
             print("🔄 Retour PHASE 1")
             page.wait_for_timeout(1000)
+        print("passage termine")
 
 
 if __name__ == "__main__":
