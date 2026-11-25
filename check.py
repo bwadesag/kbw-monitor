@@ -1,10 +1,11 @@
 import os, re, time, requests
 from datetime import date
-from playwright.sync_api import sync_playwright
 
 URL = "https://kbw-personal-services.butlerapp2.de/demo#/courses?fcourses=yaounde_deutsch_b2"
 TOKEN = os.getenv("TG_TOKEN", "")
 CHAT_IDS = ["8806922221", "-5434725968"]
+# ponytail: 8 pages is the ceiling. The loop stops earlier when the next page number is absent.
+MAX_PAGES = 8
 
 notifie_libre_aujourdhui = {}
 notifie_complet_aujourdhui = {}
@@ -12,90 +13,125 @@ notifie_complet_aujourdhui = {}
 def notify(text):
     for cid in CHAT_IDS:
         try:
-            requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage",
-                          json={"chat_id": cid, "text": text, "parse_mode": "HTML"}, timeout=15)
-        except: pass
+            response = requests.post(
+                f"https://api.telegram.org/bot{TOKEN}/sendMessage",
+                json={"chat_id": cid, "text": text, "parse_mode": "HTML"},
+                timeout=15,
+            )
+            if response.status_code != 200:
+                print(f"  telegram {response.status_code} {response.text[:160]}")
+        except Exception as exc:
+            print(f"  telegram: {exc}")
     print(text)
+
+def _is_libre(cls, text):
+    # The site shows the date, then the time: "26.11.2026 8:00 Uhr".
+    # A full row carries the class booked-out. A free row does not.
+    text = " ".join((text or "").split())
+    if re.search(r"booked-out|waiting|warteliste", cls or "", re.I):
+        return False
+    if re.search(r"ausgebucht|warteliste", text, re.I):
+        return False
+    return bool(re.search(r"\d{2}\.\d{2}\.\d{4}", text) and re.search(r"\d{1,2}:\d{2}", text))
+
+def _self_check():
+    assert _is_libre("ws-data-row", "26.11.2026 8:00 Uhr")
+    assert _is_libre("ws-data-row", "8:00 Uhr 26.11.2026")
+    assert not _is_libre(
+        "ws-data-row ws-data-row-booked-out ws-course-yaounde_deutsch_b2",
+        "26.11.2026 8:00 Uhr",
+    )
+    assert not _is_libre("ws-data-row", "Start Time")
+    assert not _is_libre("ws-data-row ws-data-row-waiting", "02.12.2026 11:30 Uhr")
+    print("self-check ok")
 
 def scan(page):
     libres = set()
-    for pnum in range(1,5):
+    for pnum in range(1, MAX_PAGES + 1):
         page.wait_for_timeout(1200)
-        cnt = page.locator('text=/\\d{1,2}:\\d{2} Uhr.*\\d{2}\\.\\d{2}\\.\\d{4}/').count()
-        for i in range(cnt):
-            try:
-                h = page.locator('text=/\\d{1,2}:\\d{2} Uhr.*\\d{2}\\.\\d{2}\\.\\d{4}/').nth(i)
-                txt = h.inner_text().strip()
-                if not txt: continue
-                h.click(); page.wait_for_timeout(600)
-                has_b = page.locator('button, a').filter(has_text=re.compile(r'Buchen|Anmelden|Reservieren', re.I)).count() > 0
-                full = page.locator('text=/ausgebucht|Warteliste/i').count() > 0
-                dis = page.locator('button[disabled]').filter(has_text=re.compile(r'Buchen', re.I)).count()
-                if has_b and not full and dis == 0:
-                    libres.add(txt)
-                try: h.click(); page.wait_for_timeout(150)
-                except: pass
-            except: continue
-        if pnum < 4:
-            try:
-                nxt = page.locator(f'text="{pnum+1}"').first
-                if nxt.count()>0: nxt.click()
-                else: page.locator('text=">"').last.click()
-                page.wait_for_timeout(2500)
-            except: break
+        rows = page.locator("tr.ws-data-row")
+        for i in range(rows.count()):
+            row = rows.nth(i)
+            cls = row.get_attribute("class") or ""
+            txt = " ".join(row.inner_text().split())
+            if _is_libre(cls, txt):
+                libres.add(txt)
+        if pnum >= MAX_PAGES:
+            break
+        try:
+            nxt = page.get_by_text(str(pnum + 1), exact=True)
+            if nxt.count() > 0:
+                nxt.first.click()
+            else:
+                page.get_by_text(">", exact=True).last.click()
+            page.wait_for_timeout(1500)
+        except Exception:
+            break
     return libres
 
-notify("✅ Bot démarré - anti-doublon = même jour bloqué - 24h/24")
+def main():
+    from playwright.sync_api import sync_playwright
 
-with sync_playwright() as p:
-    browser = p.chromium.launch(headless=True, args=["--no-sandbox"])
-    page = browser.new_page()
-    memo = set()
-    first = True
-    start = time.time()
-    # 5h50 = 21000s -> le workflow le relancera tout seul pour faire 24h/24
-    max_dur = 21000 if os.getenv("GITHUB_ACTIONS")=="true" else 999999999
+    notify("✅ Bot démarré - lecture date puis heure - 24h/24")
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True, args=["--no-sandbox"])
+        page = browser.new_page()
+        memo = set()
+        first = True
+        start = time.time()
+        # 5h50 = 21000s -> le workflow le relancera tout seul pour faire 24h/24
+        max_dur = 21000 if os.getenv("GITHUB_ACTIONS") == "true" else 999999999
 
-    while time.time() - start < max_dur:
-        print(f"\n🔵 PHASE 1 : INIT")
-        try:
-            page.goto(URL, wait_until="domcontentloaded", timeout=60000)
-            page.wait_for_timeout(4000)
-        except:
-            try: browser.close()
-            except: pass
-            browser = p.chromium.launch(headless=True, args=["--no-sandbox"])
-            page = browser.new_page()
-            continue
+        while time.time() - start < max_dur:
+            print("\n🔵 PHASE 1 : INIT")
+            try:
+                page.goto(URL, wait_until="domcontentloaded", timeout=60000)
+                page.wait_for_timeout(4000)
+            except Exception:
+                try:
+                    browser.close()
+                except Exception:
+                    pass
+                browser = p.chromium.launch(headless=True, args=["--no-sandbox"])
+                page = browser.new_page()
+                continue
 
-        print(f"🟡 PHASE 2 : DETECTION")
-        actuelles = scan(page)
-        print(f"  → {len(actuelles)} libres")
+            print("🟡 PHASE 2 : DETECTION")
+            actuelles = scan(page)
+            detail = ", ".join(sorted(actuelles))
+            print(f"  → {len(actuelles)} libres" + (f" : {detail}" if detail else ""))
 
-        if first:
+            if first:
+                memo = actuelles
+                first = False
+                print(f"  Init: {len(memo)} mémorisées, pas de notif au 1er tour")
+                continue
+
+            print("🟢 PHASE 3 : ENVOI LIBRE")
+            for slot in actuelles:
+                if slot in notifie_libre_aujourdhui and notifie_libre_aujourdhui[slot] == date.today():
+                    print(f"  ⏭ Déjà notifié aujourd'hui: {slot}")
+                    continue
+                if slot not in memo or notifie_libre_aujourdhui.get(slot) != date.today():
+                    notify(f"🔥 <b>LIBRE</b>\n📌 {slot}\n👉 {URL}")
+                    notifie_libre_aujourdhui[slot] = date.today()
+
+            print("🔴 PHASE 4 : COMPLET")
+            redevenues = memo - actuelles
+            for slot in redevenues:
+                if slot in notifie_complet_aujourdhui and notifie_complet_aujourdhui[slot] == date.today():
+                    print(f"  ⏭ Complet déjà notifié aujourd'hui: {slot}")
+                    continue
+                notify(f"❌ <b>Redevenu complet</b>\n📌 {slot}")
+                notifie_complet_aujourdhui[slot] = date.today()
+
             memo = actuelles
-            first = False
-            print(f"  Init: {len(memo)} mémorisées, pas de notif au 1er tour")
-            continue
+            print("🔄 Retour PHASE 1")
+            page.wait_for_timeout(1000)
 
-        print(f"🟢 PHASE 3 : ENVOI LIBRE")
-        for slot in actuelles:
-            if slot in notifie_libre_aujourdhui and notifie_libre_aujourdhui[slot] == date.today():
-                print(f"  ⏭ Déjà notifié aujourd'hui: {slot}")
-                continue
-            if slot not in memo or notifie_libre_aujourdhui.get(slot) != date.today():
-                notify(f"🔥 <b>LIBRE</b>\n📌 {slot}\n👉 {URL}")
-                notifie_libre_aujourdhui[slot] = date.today()
 
-        print(f"🔴 PHASE 4 : COMPLET")
-        redevenues = memo - actuelles
-        for slot in redevenues:
-            if slot in notifie_complet_aujourdhui and notifie_complet_aujourdhui[slot] == date.today():
-                print(f"  ⏭ Complet déjà notifié aujourd'hui: {slot}")
-                continue
-            notify(f"❌ <b>Redevenu complet</b>\n📌 {slot}")
-            notifie_complet_aujourdhui[slot] = date.today()
-
-        memo = actuelles
-        print(f"🔄 Retour PHASE 1")
-        page.wait_for_timeout(1000)
+if __name__ == "__main__":
+    if os.getenv("SELF_CHECK") == "1":
+        _self_check()
+    else:
+        main()
