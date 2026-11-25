@@ -1,7 +1,10 @@
 import os, re, time, requests
 from datetime import date
 
-URL = "https://kbw-personal-services.butlerapp2.de/demo#/courses?fcourses=yaounde_deutsch_b2"
+COURSES = (
+    ("Yaounde B2", "https://kbw-personal-services.butlerapp2.de/demo#/courses?fcourses=yaounde_deutsch_b2"),
+    ("Douala B2", "https://kbw-personal-services.butlerapp2.de/demo#/courses?fcourses=douala_deutsch_b2"),
+)
 TOKEN = os.getenv("TG_TOKEN", "")
 CHAT_IDS = ["8806922221", "-5434725968"]
 # ponytail: 8 pages is the ceiling. The loop stops earlier when the next page number is absent.
@@ -43,7 +46,37 @@ def _self_check():
     )
     assert not _is_libre("ws-data-row", "Start Time")
     assert not _is_libre("ws-data-row ws-data-row-waiting", "02.12.2026 11:30 Uhr")
+    assert not _is_libre(
+        "ws-data-row ws-data-row-booked-out ws-course-douala_deutsch_b2",
+        "26.11.2026 8:00 Uhr",
+    )
+    assert _lien("Douala B2 — 26.11.2026 8:00 Uhr").endswith("douala_deutsch_b2")
+    assert _lien("Yaounde B2 — 26.11.2026 8:00 Uhr").endswith("yaounde_deutsch_b2")
     print("self-check ok")
+
+def _lien(slot):
+    for city, url in COURSES:
+        if slot.startswith(city):
+            return url
+    return COURSES[0][1]
+
+def collect(page):
+    found = set()
+    failed = 0
+    for city, url in COURSES:
+        try:
+            page.goto(url, wait_until="domcontentloaded", timeout=60000)
+            page.wait_for_timeout(4000)
+            slots = {f"{city} — {slot}" for slot in scan(page)}
+        except Exception as exc:
+            failed += 1
+            print(f"  {city}: {exc}")
+            continue
+        print(f"  {city}: {len(slots)} libres")
+        found |= slots
+    if failed == len(COURSES):
+        raise RuntimeError("aucune page")
+    return found
 
 def scan(page):
     libres = set()
@@ -72,7 +105,7 @@ def scan(page):
 def main():
     from playwright.sync_api import sync_playwright
 
-    notify("✅ Bot démarré - lecture date puis heure - 24h/24")
+    notify("✅ Bot démarré - Yaounde B2 et Douala B2")
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True, args=["--no-sandbox"])
         page = browser.new_page()
@@ -84,10 +117,11 @@ def main():
 
         while time.time() - start < max_dur:
             print("\n🔵 PHASE 1 : INIT")
+            print("🟡 PHASE 2 : DETECTION")
             try:
-                page.goto(URL, wait_until="domcontentloaded", timeout=60000)
-                page.wait_for_timeout(4000)
-            except Exception:
+                actuelles = collect(page)
+            except Exception as exc:
+                print(f"  pages: {exc}")
                 try:
                     browser.close()
                 except Exception:
@@ -95,9 +129,6 @@ def main():
                 browser = p.chromium.launch(headless=True, args=["--no-sandbox"])
                 page = browser.new_page()
                 continue
-
-            print("🟡 PHASE 2 : DETECTION")
-            actuelles = scan(page)
             detail = ", ".join(sorted(actuelles))
             print(f"  → {len(actuelles)} libres" + (f" : {detail}" if detail else ""))
 
@@ -113,7 +144,7 @@ def main():
                     print(f"  ⏭ Déjà notifié aujourd'hui: {slot}")
                     continue
                 if slot not in memo or notifie_libre_aujourdhui.get(slot) != date.today():
-                    notify(f"🔥 <b>LIBRE</b>\n📌 {slot}\n👉 {URL}")
+                    notify(f"🔥 <b>LIBRE</b>\n📌 {slot}\n👉 {_lien(slot)}")
                     notifie_libre_aujourdhui[slot] = date.today()
 
             print("🔴 PHASE 4 : COMPLET")
