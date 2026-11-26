@@ -1,10 +1,12 @@
 name: KBW 8h-18h
 on:
   schedule:
-    # UTC. Heure locale = UTC+1 (Cameroun).
-    # 8:00, puis 13:50 pour couvrir jusqu'à 18:00 sans dépasser 6h par job.
-    - cron: "0 7 * * *"
+    # UTC. Heure locale = UTC+1. Minute 0 is often dropped, so nothing starts at :00.
+    # 8:10, backup 9:30, then 13:50 and 15:10. A run already going is left alone.
+    - cron: "10 7 * * *"
+    - cron: "30 8 * * *"
     - cron: "50 12 * * *"
+    - cron: "10 14 * * *"
   workflow_dispatch:
 
 permissions:
@@ -12,7 +14,7 @@ permissions:
 
 concurrency:
   group: kbw-bot-unique
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   check:
