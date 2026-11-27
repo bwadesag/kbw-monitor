@@ -11,6 +11,7 @@ on:
 
 permissions:
   contents: read
+  actions: write
 
 concurrency:
   group: kbw-bot-unique
@@ -31,3 +32,14 @@ jobs:
         env:
           TG_TOKEN: ${{ secrets.TG_TOKEN }}
         run: python -u check.py
+      - name: Relais avant 18h
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ ! -f CONTINUE.txt ]; then echo "18h atteinte, pas de relais"; exit 0; fi
+          curl -fsS -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/workflows/kbw.yml/dispatches" \
+            -d '{"ref":"main"}'

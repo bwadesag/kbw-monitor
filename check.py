@@ -56,11 +56,18 @@ def _self_check():
     assert not _dans_horaire(datetime(2026, 11, 25, 6, 59, tzinfo=timezone.utc))
     assert _dans_horaire(datetime(2026, 11, 25, 16, 59, tzinfo=timezone.utc))
     assert not _dans_horaire(datetime(2026, 11, 25, 17, 0, tzinfo=timezone.utc))
+    assert _doit_relayer(datetime(2026, 11, 25, 12, 40, tzinfo=timezone.utc), True)
+    assert not _doit_relayer(datetime(2026, 11, 25, 17, 0, tzinfo=timezone.utc), True)
+    assert not _doit_relayer(datetime(2026, 11, 25, 9, 0, tzinfo=timezone.utc), False)
     print("self-check ok")
 
 def _dans_horaire(moment_utc):
     # 8:00 inclus, 18:00 exclus, heure du Cameroun (UTC+1, sans changement d'heure).
     return 8 <= (moment_utc + timedelta(hours=1)).hour < 18
+
+def _doit_relayer(moment_utc, deadline_passed):
+    # One handoff before 18:00. A job cannot stay up for the whole 10h window.
+    return bool(deadline_passed) and _dans_horaire(moment_utc)
 
 def _lien(slot):
     for city, url in COURSES:
@@ -122,8 +129,9 @@ def main():
         page = browser.new_page()
         memo = set()
         first = True
-        # ponytail: 5h40 stays under the 6h Actions job limit. The 13:50 run covers the rest until 18:00.
-        deadline = time.time() + (5 * 60 + 40) * 60
+        # ponytail: 5h30 stays under the 6h Actions limit. CONTINUE.txt asks for one more run until 18:00.
+        deadline = time.time() + (5 * 60 + 30) * 60
+        relais = False
 
         while time.time() < deadline and _dans_horaire(datetime.now(timezone.utc)):
             print("\n🔵 PHASE 1 : INIT")
@@ -169,7 +177,12 @@ def main():
             memo = actuelles
             print("🔄 Retour PHASE 1")
             page.wait_for_timeout(1000)
+        relais = _doit_relayer(datetime.now(timezone.utc), time.time() >= deadline)
         print("passage termine")
+    if relais:
+        with open("CONTINUE.txt", "w", encoding="utf-8") as handle:
+            handle.write("relais")
+        print("relais avant 18h")
 
 
 if __name__ == "__main__":
